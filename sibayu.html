@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Multimode Indonesia</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+
+  <div class="max-w-3xl mx-auto flex flex-col h-screen p-4">
+    <h1 class="text-xl font-bold mb-2">Asisten AI Multifungsi</h1>
+
+    <div class="flex items-center gap-2 mb-2">
+      <label for="aiStyle" class="text-sm font-medium">Mode AI:</label>
+      <select id="aiStyle" class="border rounded p-1 text-sm">
+        <option value="gpt">GPT Mode (Logika & Kode)</option>
+        <option value="gemini">Gemini Mode (Multimodal)</option>
+        <option value="claude">Claude Mode (Panjang & Bijak)</option>
+        <option value="llama">LLaMA Mode (Cepat & Ringan)</option>
+      </select>
+    </div>
+
+    <div id="chatBox" class="flex-1 overflow-y-auto bg-white p-4 rounded shadow space-y-4"></div>
+
+    <textarea id="editor" class="w-full h-40 mt-2 p-2 font-mono text-sm border rounded hidden" placeholder="Edit HTML hasil dari AI di sini..."></textarea>
+
+    <form id="chatForm" class="mt-4 flex gap-2">
+      <input id="userInput" type="text" placeholder="Tulis pesan atau klik mic..." required class="flex-1 p-2 border rounded" />
+      <button type="button" id="voiceBtn" class="bg-yellow-400 px-4 rounded">🎤</button>
+      <button type="submit" class="bg-blue-600 text-white px-4 rounded">Kirim</button>
+    </form>
+
+    <input type="file" id="fileInput" class="mt-4" />
+  </div>
+
+  <script>
+    const chatBox = document.getElementById("chatBox");
+    const chatForm = document.getElementById("chatForm");
+    const userInput = document.getElementById("userInput");
+    const editor = document.getElementById("editor");
+    const fileInput = document.getElementById("fileInput");
+    const voiceBtn = document.getElementById("voiceBtn");
+    const aiStyle = document.getElementById("aiStyle");
+    let chatHistory = [];
+
+    function addMessage(text, sender, imageUrl = null) {
+      const div = document.createElement("div");
+      div.className = `p-3 rounded max-w-[80%] whitespace-pre-wrap ${sender === "user" ? "bg-green-200 self-end" : "bg-gray-200 self-start"}`;
+      div.textContent = text;
+
+      if (sender === "ai" && imageUrl) {
+        const img = document.createElement("img");
+        img.src = imageUrl;
+        img.alt = "Gambar hasil permintaan";
+        img.className = "mt-2 rounded max-w-xs";
+        div.appendChild(img);
+      }
+
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+
+      chatHistory.push({ sender, text, image: imageUrl || null });
+      localStorage.setItem("chatHistory", JSON.stringify(chatHistory));
+
+      if (text.includes("<html") || text.includes("<!DOCTYPE")) {
+        editor.style.display = "block";
+        editor.value = text;
+      }
+    }
+
+    function getSystemPrompt(style) {
+      const base = `
+Kamu adalah asisten AI profesional yang membalas dalam bahasa Indonesia.
+Jangan gunakan bahasa asing.`;
+      if (style === "gpt") return base + "\nFokus pada logika, penalaran, dan kode.";
+      if (style === "gemini") return base + "\nMultimodal: kamu bisa memberikan teks dan gambar jika diperlukan.";
+      if (style === "claude") return base + "\nJawabanmu bijak, panjang, dan mendalam.";
+      if (style === "llama") return base + "\nJawaban cepat dan to the point.";
+      return base;
+    }
+
+    async function getAIReply(userText) {
+      addMessage(userText, "user");
+
+      const loading = document.createElement("div");
+      loading.textContent = "Mengetik...";
+      loading.className = "p-3 rounded bg-gray-300 self-start";
+      chatBox.appendChild(loading);
+
+      const style = aiStyle.value;
+      const systemPrompt = getSystemPrompt(style);
+      const fullPrompt = `${systemPrompt}\nPengguna: ${userText}`;
+
+      try {
+        const res = await fetch("https://api.yupradev.biz.id/api/ai/gpt?text=" + encodeURIComponent(fullPrompt), {
+          method: "GET",
+          headers: { "apikey": "54b4394f-e7af-47db-b894-7ef23535e9ae" }
+        });
+
+        const data = await res.json();
+        loading.remove();
+        const reply = data.result || "Maaf, tidak ada respons dari AI.";
+        const imageUrl = style === "gemini" ? await searchImageIfNeeded(userText) : null;
+        addMessage(reply, "ai", imageUrl);
+      } catch {
+        loading.textContent = "Gagal menghubungi AI.";
+      }
+    }
+
+    chatForm.onsubmit = e => {
+      e.preventDefault();
+      const text = userInput.value.trim();
+      if (text) {
+        getAIReply(text);
+        userInput.value = "";
+      }
+    };
+
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = "id-ID";
+    recognition.onresult = function (event) {
+      userInput.value = event.results[0][0].transcript;
+    };
+    voiceBtn.onclick = () => recognition.start();
+
+    async function searchImageIfNeeded(text) {
+      const keywords = ["gambar", "foto", "tampilkan", "lihat"];
+      const shouldSearch = keywords.some(k => text.toLowerCase().includes(k));
+      if (!shouldSearch) return null;
+
+      const searchTerm = text.replace(/tampilkan|gambar|lihat|foto/gi, "").trim();
+      const query = encodeURIComponent(searchTerm);
+      try {
+        const res = await fetch(`https://api.duckduckgo.com/?q=${query}&format=json&pretty=1`);
+        const data = await res.json();
+        return data.Image || null;
+      } catch {
+        return null;
+      }
+    }
+
+    window.addEventListener("load", () => {
+      const saved = JSON.parse(localStorage.getItem("chatHistory") || "[]");
+      saved.forEach(msg => addMessage(msg.text, msg.sender, msg.image));
+    });
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      addMessage(`File diunggah: ${file.name}`, "user");
+    });
+  </script>
+</body>
+</html>
